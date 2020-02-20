@@ -1,0 +1,5 @@
+#!/bin/bash
+export > /etc/envvars
+rm -f /var/run/syslogd.pid
+/usr/sbin/rsyslogd
+/bin/columnstore-init > /var/log/mariadb/columnstore/columnstore-init.log

@@ -1,0 +1,5 @@
+#!/bin/bash
+
+/usr/bin/monit -g ColumnStore unmonitor
+mcsadmin restartSystem y
+/usr/bin/monit -g ColumnStore monitor

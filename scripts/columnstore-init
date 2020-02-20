@@ -1,0 +1,162 @@
+#!/bin/bash
+shopt -s expand_aliases
+
+# Create alias if necessary for backwards compatiblity
+MYSQL_BIN=/usr/local/mariadb/columnstore/mysql/bin/mysql
+if test -f "$MYSQL_BIN"; then
+  alias mariadb="/usr/local/mariadb/columnstore/mysql/bin/mysql --defaults-extra-file=/usr/local/mariadb/columnstore/mysql/my.cnf -u root"
+fi
+
+# Set some variables
+CAP_PCT=99 #(0-99)
+FLAG=/etc/columnstore/container-initialized
+MAX_RAM=$( free -mt | awk 'NR==4{printf "%d", $2*.'$CAP_PCT' }' )
+NUMBLOCKSPCT=$( echo $MAX_RAM / 2  | bc )M
+SERVER_ID=$( hostname -i | cut -d "." -f 4 )
+SERVER_SUBNET=$( hostname -i | cut -d "." -f 1-3 -s )
+TOTALUMMEMORY=$( echo $MAX_RAM / 4  | bc )M
+
+# Set some conditional defaults
+if [ -z $ANALYTICS_ONLY ]; then
+  ANALYTICS_ONLY=0
+fi
+
+if [ -z $SKIP_OAM_INIT ]; then
+  SKIP_OAM_INIT=0
+fi
+
+if [ -z $USE_S3_STORAGE ]; then
+  USE_S3_STORAGE=0
+fi
+
+# postConfigure function
+run_postConfigure()
+{
+    postConfigureParameter="-x -xr -numBlocksPct $NUMBLOCKSPCT -totalUmMemory $TOTALUMMEMORY"
+    if [ $USE_S3_STORAGE -eq 1 ]; then
+        echo -e "1\n\n4\n1\n" | postConfigure $postConfigureParameter
+    else
+        postConfigure -qs $postConfigureParameter
+    fi
+    if [ 0 -eq $? ]; then
+        echo "Installation successful."
+    else
+        echo "ERROR: postConfigure crashed with exit code $?"
+        exit 1
+    fi
+}
+
+# Set server id if ColumnStore version 1.4 and above
+CS_CONFIG=/etc/my.cnf.d/columnstore.cnf
+if test -f "$CS_FILE"; then
+  sed -i "s|server-id=.*|server-id=$SERVER_ID|" $CS_CONFIG
+fi
+
+# Configure storagemanager
+if [ $USE_S3_STORAGE -eq 1 ]; then
+  sed -i "s|bucket =.*|bucket = $S3_BUCKET|" /etc/columnstore/storagemanager.cnf
+  sed -i "s|endpoint =.*|endpoint = $S3_ENDPOINT|" /etc/columnstore/storagemanager.cnf
+  sed -i "s|aws_access_key_id =.*|aws_access_key_id = $S3_ACCESS_KEY_ID|" /etc/columnstore/storagemanager.cnf
+  sed -i "s|aws_secret_access_key =.*|aws_secret_access_key = $S3_SECRET_ACCESS_KEY|" /etc/columnstore/storagemanager.cnf
+fi
+
+# Disable transactional tables
+if [ $ANALYTICS_ONLY -eq 1 ]; then
+  sed -i "s|#default_storage_engine=.*|default_storage_engine=Columnstore|" /etc/my.cnf.d/columnstore.cnf
+  sed -i "s|#enforce_storage_engine=.*|enforce_storage_engine=Columnstore|" /etc/my.cnf.d/columnstore.cnf
+fi
+
+# Start ColumnStore unless this is the first run, in which case we will do postConfigure first
+if [ -e $FLAG ]; then
+  if [ $SKIP_OAM_INIT -eq 1 ]; then
+    columnstore-start
+  else
+    columnstore start
+  fi
+else
+  # Run postConfigure
+  run_postConfigure
+  if [ $SKIP_OAM_INIT -eq 1 ]; then
+    columnstore-start
+    dbbuilder 7
+  fi
+
+  MARIADB_RUNNING=$(ps -ef | grep -v grep | grep -v mysqld_safe | grep mysqld | wc -l)
+  if [ $MARIADB_RUNNING -gt 0 ]; then
+
+    # Get version
+    MARIADB_VERSION=$( mariadb -Ns -e "SELECT LEFT(VERSION(),4);" )
+
+    # Prepare system
+    if (( $(echo "$MARIADB_VERSION > 10.3" | bc -l) )); then
+      mariadb -e "UNINSTALL PLUGIN simple_password_check;"
+    fi
+    mariadb -e "DELETE FROM mysql.user WHERE user = ''; DROP DATABASE IF EXISTS test;"
+    if [ $? -ne 0 ]; then
+        echo "ERROR: During preparing system."
+        exit 1
+    fi
+
+    # Create Cross Engine Join user account
+    CEJ_PASSWORD="'"
+    while [[ $CEJ_PASSWORD != *[[:lower:]]* ]] || \
+          [[ $CEJ_PASSWORD != *[[:upper:]]* ]] || \
+          [[ $CEJ_PASSWORD != *[0-9]* ]] || \
+          [[ $CEJ_PASSWORD == */* ]] || \
+          [[ $CEJ_PASSWORD != *=* ]]; do
+            CEJ_PASSWORD="$(openssl rand -base64 20)"
+    done
+    mariadb -e "GRANT SELECT ON *.* TO 'cej'@'127.0.0.1' IDENTIFIED BY '$CEJ_PASSWORD';"
+    if [ $? -ne 0 ]; then
+        echo "ERROR: During cross engine join user creation."
+        exit 1
+    fi
+    sed -i "s|<User>root</User>|<User>cej</User>|" /etc/columnstore/Columnstore.xml
+    sed -i "s|<Password/>|<Password>$CEJ_PASSWORD</Password>|" /etc/columnstore/Columnstore.xml
+    unset CEJ_PASSWORD
+
+    # Add custom host for root user
+    if [ $MARIADB_ROOT_HOST ]; then
+      mariadb -e "CREATE USER 'root'@'$MARIADB_ROOT_HOST';
+                  GRANT ALL PRIVILEGES ON *.* TO 'root'@'$MARIADB_ROOT_HOST' WITH GRANT OPTION;"
+        if [ $? -ne 0 ]; then
+          echo "ERROR: During 'root'@'$MARIADB_ROOT_HOST' creation."
+          exit 1
+        fi
+    fi
+
+    # Add custom password for root user
+    if [ $MARIADB_ROOT_PASSWORD ]; then
+        mariadb -Ns -e "SELECT host from mysql.user WHERE user = 'root'" | while read host; do
+        mariadb -e "ALTER USER 'root'@'$host' IDENTIFIED BY '$MARIADB_ROOT_PASSWORD';"
+      done
+      if [ $? -ne 0 ]; then
+        echo "ERROR: During root password update."
+        exit 1
+      fi
+      unset MARIADB_ROOT_PASSWORD
+    fi
+
+  # Throw error if MariaDB is not running
+  else
+    echo "ERROR: MariaDB is not running, cannot create cross engine join user."
+    exit 1
+  fi
+
+  # Stop ColumnStore processes if using SKIP_OAM_INIT
+  if [ $SKIP_OAM_INIT -eq 1 ]; then
+    columnstore-stop
+  fi
+
+  # Create flag file on first run
+  touch $FLAG
+
+  # Restart ColumnStore after postConfigure and allow config changes to take place
+  if [ $SKIP_OAM_INIT -eq 1 ]; then
+    columnstore-start
+  else
+    mcsadmin restartSystem y
+  fi
+
+fi
+exit 0
