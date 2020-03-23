@@ -83,7 +83,7 @@ RUN chmod 0600 /etc/monitrc && \
     /bin/columnstore-init \
     /bin/columnstore-restart
 
-# Work Around Ror https://jira.mariadb.org/browse/MCOL-3830
+# Work Around For https://jira.mariadb.org/browse/MCOL-3830
 RUN rm -rf /etc/systemd/system/mariadb.service.d \
     /usr/lib/systemd/system/mariadb.service \
     /usr/lib/systemd/system/mariadb@.service \
