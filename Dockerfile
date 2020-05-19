@@ -18,6 +18,7 @@ RUN yum -y install bind-utils \
     expect \
     file \
     jemalloc \
+    less \
     libaio \
     libcurl \
     libnl \
