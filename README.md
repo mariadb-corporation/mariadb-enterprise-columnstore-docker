@@ -1,6 +1,6 @@
 ![logo](https://raw.githubusercontent.com/mariadb-corporation/mariadb-enterprise-columnstore-docker/master/MDB-HLogo_RGB.jpg)
 
-# MariaDB ColumnStore 1.4 Enterprise Docker Image
+# MariaDB ColumnStore Enterprise Docker Image
 
 ## Summary
 MariaDB ColumnStore is a columnar storage engine that utilizes a massively parallel distributed data architecture. It was built by porting InfiniDB to MariaDB and has been released under the GPL license.
@@ -30,7 +30,7 @@ To build the MariaDB ColumnStore image, run the following commands:
 1. `git clone https://github.com/mariadb-corporation/mariadb-enterprise-columnstore-docker.git`
 1. `cd` into the newly cloned folder
 1. ```docker build . --tag mcs_image --build-arg MARIADB_ENTERPRISE_TOKEN=your_token_here```
-1. ```docker run -d -p 3306:3306 --name mcs_container mcs_image```
+1. ```docker run -d -p 3306:3306 --memory-swappiness=1 --name mcs_container mcs_image```
 1. ```docker exec -it mcs_container bash```
 
 ## Customization
@@ -50,6 +50,7 @@ Example:
 
 ```
 docker run -d -p 3306:3306 \
+--memory-swappiness=1 \
 -e MARIADB_ROOT_HOST=% \
 -e MARIADB_ROOT_PASSWORD=mypassword \
 -e USE_S3_STORAGE=1 \
@@ -77,7 +78,7 @@ An additional database user named '__cej__' has been created. Removal of this us
 ```
 Welcome to the MariaDB monitor.  Commands end with ; or \g.
 Your MariaDB connection id is 9
-Server version: 10.4.11-5-MariaDB-enterprise MariaDB Enterprise Server
+Server version: 10.4.12-6-MariaDB-enterprise MariaDB Enterprise Server
 
 Copyright (c) 2000, 2018, Oracle, MariaDB Corporation Ab and others.
 

@@ -1,9 +1,6 @@
 # vim:set ft=dockerfile:
 FROM centos:7
 
-# Set Default ENV Variables
-ENV TINI_VERSION=v0.18.0
-
 ARG MARIADB_ENTERPRISE_TOKEN
 
 # Update System
@@ -36,7 +33,6 @@ RUN yum -y install bind-utils \
     perl-DBI \
     psmisc \
     rsync \
-    rsyslog \
     snappy \
     sudo \
     sysvinit-tools \
@@ -44,9 +40,13 @@ RUN yum -y install bind-utils \
     which \
     zlib && \
     yum clean all && \
-    rm -rf /var/cache/yum && \
-    rm -rf /etc/rsyslog.d/listen.conf && \
-    localedef -i en_US -f UTF-8 en_US.UTF-8
+    rm -rf /var/cache/yum
+
+# Default env variables
+ENV LC_ALL en_US.UTF-8
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US.UTF-8
+ENV TINI_VERSION=v0.18.0
 
 # Add Tini Init Process
 ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /usr/bin/tini
@@ -66,9 +66,7 @@ RUN yum -y install MariaDB-server \
     rm -rf /var/cache/yum
 
 # Copy Files To Image
-COPY config/rsyslog.conf \
-     config/monitrc \
-     config/monit.d/ /etc/
+COPY config/monit.d/ /etc/
 
 COPY config/storagemanager.cnf /etc/columnstore/storagemanager.cnf
 
