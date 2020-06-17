@@ -8,35 +8,27 @@ if test -f "$MYSQL_BIN"; then
 fi
 
 # Set some variables
+ANALYTICS_ONLY="${ANALYTICS_ONLY:-0}"
+USE_S3_STORAGE="${USE_S3_STORAGE:-0}"
 CAP_PCT=99 #(0-99)
+CS_CONFIG=/etc/my.cnf.d/columnstore.cnf
 FLAG=/etc/columnstore/container-initialized
+LOG_PREFIX=/var/log/mariadb/columnstore
 MAX_RAM=$( free -mt | awk 'NR==4{printf "%d", $2*.'$CAP_PCT' }' )
+MCS_INSTALL_BIN=/usr/bin
+MCS_INSTALL_PATH=/var/lib/columnstore
 NUMBLOCKSPCT=$( echo $MAX_RAM / 2  | bc )M
 SERVER_ID=$( hostname -i | cut -d "." -f 4 )
-SERVER_SUBNET=$( hostname -i | cut -d "." -f 1-3 -s )
 TOTALUMMEMORY=$( echo $MAX_RAM / 4  | bc )M
-
-# Set some conditional defaults
-if [ -z $ANALYTICS_ONLY ]; then
-  ANALYTICS_ONLY=0
-fi
-
-if [ -z $SKIP_OAM_INIT ]; then
-  SKIP_OAM_INIT=0
-fi
-
-if [ -z $USE_S3_STORAGE ]; then
-  USE_S3_STORAGE=0
-fi
 
 # postConfigure function
 run_postConfigure()
 {
     postConfigureParameter="-x -xr -numBlocksPct $NUMBLOCKSPCT -totalUmMemory $TOTALUMMEMORY"
     if [ $USE_S3_STORAGE -eq 1 ]; then
-        echo -e "1\n\n4\n1\n" | postConfigure $postConfigureParameter
+        echo -e "1\n\n4\n1\n" | $MCS_INSTALL_BIN/postConfigure $postConfigureParameter
     else
-        postConfigure -qs $postConfigureParameter
+        $MCS_INSTALL_BIN/postConfigure -qs $postConfigureParameter
     fi
     if [ 0 -eq $? ]; then
         echo "Installation successful."
@@ -47,39 +39,35 @@ run_postConfigure()
 }
 
 # Set server id if ColumnStore version 1.4 and above
-CS_CONFIG=/etc/my.cnf.d/columnstore.cnf
 if test -f "$CS_FILE"; then
   sed -i "s|server-id=.*|server-id=$SERVER_ID|" $CS_CONFIG
 fi
 
 # Configure storagemanager
 if [ $USE_S3_STORAGE -eq 1 ]; then
+  sed -i "s|\${HOME}|/var/lib/columnstore|" /etc/columnstore/storagemanager.cnf
+  sed -i "s|cache_size = 2g|cache_size = 8g|" /etc/columnstore/storagemanager.cnf
+  sed -i "s|service =.*|service = S3|" /etc/columnstore/storagemanager.cnf
+  sed -i "s|region =|# region =|" /etc/columnstore/storagemanager.cnf
   sed -i "s|bucket =.*|bucket = $S3_BUCKET|" /etc/columnstore/storagemanager.cnf
-  sed -i "s|endpoint =.*|endpoint = $S3_ENDPOINT|" /etc/columnstore/storagemanager.cnf
-  sed -i "s|aws_access_key_id =.*|aws_access_key_id = $S3_ACCESS_KEY_ID|" /etc/columnstore/storagemanager.cnf
-  sed -i "s|aws_secret_access_key =.*|aws_secret_access_key = $S3_SECRET_ACCESS_KEY|" /etc/columnstore/storagemanager.cnf
+  sed -i "s|# endpoint =.*|endpoint = $S3_ENDPOINT|" /etc/columnstore/storagemanager.cnf
+  sed -i "s|# aws_access_key_id =.*|aws_access_key_id = $S3_ACCESS_KEY_ID|" /etc/columnstore/storagemanager.cnf
+  sed -i "s|# aws_secret_access_key =.*|aws_secret_access_key = $S3_SECRET_ACCESS_KEY|" /etc/columnstore/storagemanager.cnf
 fi
 
-# Disable transactional tables
+# Set Instance Type
 if [ $ANALYTICS_ONLY -eq 1 ]; then
-  sed -i "s|#default_storage_engine=.*|default_storage_engine=Columnstore|" /etc/my.cnf.d/columnstore.cnf
-  sed -i "s|#enforce_storage_engine=.*|enforce_storage_engine=Columnstore|" /etc/my.cnf.d/columnstore.cnf
+  echo "" >> /etc/my.cnf.d/columnstore.cnf
+  echo "default_storage_engine=Columnstore" >> /etc/my.cnf.d/columnstore.cnf
+  echo "enforce_storage_engine=Columnstore" >> /etc/my.cnf.d/columnstore.cnf
 fi
 
 # Start ColumnStore unless this is the first run, in which case we will do postConfigure first
 if [ -e $FLAG ]; then
-  if [ $SKIP_OAM_INIT -eq 1 ]; then
-    columnstore-start
-  else
-    columnstore start
-  fi
+    $MCS_INSTALL_BIN/columnstore start
 else
   # Run postConfigure
   run_postConfigure
-  if [ $SKIP_OAM_INIT -eq 1 ]; then
-    columnstore-start
-    dbbuilder 7
-  fi
 
   MARIADB_RUNNING=$(ps -ef | grep -v grep | grep -v mysqld_safe | grep mysqld | wc -l)
   if [ $MARIADB_RUNNING -gt 0 ]; then
@@ -111,9 +99,10 @@ else
         echo "ERROR: During cross engine join user creation."
         exit 1
     fi
-    sed -i "s|<User>root</User>|<User>cej</User>|" /etc/columnstore/Columnstore.xml
-    sed -i "s|<Password/>|<Password>$CEJ_PASSWORD</Password>|" /etc/columnstore/Columnstore.xml
-    unset CEJ_PASSWORD
+  $MCS_INSTALL_BIN/mcsSetConfig CrossEngineSupport User "cej"
+  $MCS_INSTALL_BIN/mcsSetConfig CrossEngineSupport Password "$CEJ_PASSWORD"
+  echo "Cross engine join user created"
+  unset CEJ_PASSWORD
 
     # Add custom host for root user
     if [ $MARIADB_ROOT_HOST ]; then
@@ -143,20 +132,11 @@ else
     exit 1
   fi
 
-  # Stop ColumnStore processes if using SKIP_OAM_INIT
-  if [ $SKIP_OAM_INIT -eq 1 ]; then
-    columnstore-stop
-  fi
-
   # Create flag file on first run
   touch $FLAG
 
   # Restart ColumnStore after postConfigure and allow config changes to take place
-  if [ $SKIP_OAM_INIT -eq 1 ]; then
-    columnstore-start
-  else
-    mcsadmin restartSystem y
-  fi
+  $MCS_INSTALL_BIN/mcsadmin restartSystem y
 
 fi
 exit 0

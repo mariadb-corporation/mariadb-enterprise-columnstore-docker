@@ -20,6 +20,8 @@ RUN yum -y install bind-utils \
     libcurl \
     libnl \
     libxml2 \
+    locales \
+    locales-all \
     lsof \
     monit \
     nano \
@@ -32,10 +34,13 @@ RUN yum -y install bind-utils \
     perl \
     perl-DBI \
     psmisc \
+    python3 \
     rsync \
+    rsyslog \
     snappy \
     sudo \
     sysvinit-tools \
+    vim \
     wget \
     which \
     zlib && \
@@ -68,19 +73,14 @@ RUN yum -y install MariaDB-server \
 # Copy Files To Image
 COPY config/monit.d/ /etc/
 
-COPY config/storagemanager.cnf /etc/columnstore/storagemanager.cnf
-
-COPY config/columnstore.cnf /etc/my.cnf.d/columnstore.cnf
-
 COPY scripts/columnstore-restart \
      scripts/columnstore-init \
-     scripts/columnstore-bootstrap /bin/
+     scripts/columnstore-bootstrap /usr/bin/
 
 # Set Permissions
-RUN chmod 0600 /etc/monitrc && \
-    chmod +x /bin/columnstore-bootstrap \
-    /bin/columnstore-init \
-    /bin/columnstore-restart
+RUN chmod +x /usr/bin/columnstore-bootstrap \
+    /usr/bin/columnstore-init \
+    /usr/bin/columnstore-restart
 
 # Work Around For https://jira.mariadb.org/browse/MCOL-3830
 RUN rm -rf /etc/systemd/system/mariadb.service.d \
@@ -96,13 +96,13 @@ EXPOSE 3306
 VOLUME ["/etc/columnstore", "/var/lib/columnstore", "/var/lib/mysql"]
 
 # Copy Entrypoint To Image
-COPY scripts/docker-entrypoint.sh /usr/local/bin/
+COPY scripts/docker-entrypoint.sh /usr/bin/
 
 # Make Entrypoint Executable & Create Legacy Symlink
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
-    ln -s /usr/local/bin/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /usr/bin/docker-entrypoint.sh && \
+    ln -s /usr/bin/docker-entrypoint.sh /docker-entrypoint.sh
 
 # Bootstrap
 ENTRYPOINT ["/usr/bin/tini","--","docker-entrypoint.sh"]
 
-CMD /bin/columnstore-bootstrap && /usr/bin/monit -I
+CMD columnstore-bootstrap && monit -I

@@ -1,9 +1,11 @@
 #!/bin/bash
 
 function exitColumnStore {
-  /usr/bin/monit quit
-  /usr/bin/columnstore stop
+  monit quit
+  columnstore stop
 }
+
+rsyslogd
 
 trap exitColumnStore SIGTERM
 
