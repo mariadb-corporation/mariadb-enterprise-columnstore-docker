@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# Set Variables
+PROGS='StorageManager workernode controllernode PrimProc ExeMgr DMLProc DDLProc mariadbd WriteEngineServer'
+MCS_INSTALL_BIN=/usr/bin
+
+# Stop System
+echo Stopping...
+
+if  [[ ! -z $(pidof $PROGS) ]]; then
+   $MCS_INSTALL_BIN/save_brm
+
+   echo Sending SIGTERM
+   kill $(pidof $PROGS) > /dev/null
+   sleep 3
+   # Make sure StorageManager had a chance to shutdown clean
+   counter=1
+   while [ -n "$(pidof StorageManager)" -a $counter -le 60 ]
+   do
+     sleep 1
+     ((counter++))
+   done
+   echo Sending SIGKILL
+   kill -9 $(pidof $PROGS) > /dev/null
+fi
+
+echo Clearing SHM
+$MCS_INSTALL_BIN/clearShm
+
+exit 0

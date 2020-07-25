@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# Set Variables
+IFLAG=/etc/columnstore/container-initialized
+LOG_PREFIX=/var/log/mariadb/columnstore
+MCS_INSTALL_PATH=/var/lib/columnstore
+MCS_INSTALL_BIN=/usr/bin
+PROGS='StorageManager load_brm workernode controllernode PrimProc ExeMgr DMLProc DDLProc WriteEngineServer'
+JEMALLOC_PATH="/usr/lib64/libjemalloc.so.2"
+export LD_PRELOAD=$JEMALLOC_PATH
+
+# Intialize Container If Necessary
+if [ ! -e $IFLAG ]; then
+  $MCS_INSTALL_BIN/columnstore-init > $LOG_PREFIX/columnstore-init.log
+fi
+
+# Verify All Programs Are Available
+for i in $PROGS ; do
+  if [ ! -x $MCS_INSTALL_BIN/$i ] ; then
+    echo "$i doesn't exist."
+    exit 1
+  fi
+done
+
+# Start System
+echo Starting...
+
+$MCS_INSTALL_BIN/StorageManager &> $LOG_PREFIX/storagemanager.log &
+echo StorageManager PID = $!
+
+echo loading BRM
+$MCS_INSTALL_BIN/mcs-loadbrm.py
+
+$MCS_INSTALL_BIN/workernode DBRM_Worker1 &> $LOG_PREFIX/workernode.log &
+echo workernode PID = $!
+
+$MCS_INSTALL_BIN/controllernode &> $LOG_PREFIX/controllernode.log &
+echo controllernode PID = $!
+
+$MCS_INSTALL_BIN/PrimProc &> $LOG_PREFIX/primproc.log &
+echo PrimProc PID = $!
+
+sleep 1
+
+$MCS_INSTALL_BIN/ExeMgr &> $LOG_PREFIX/exemgr.log &
+echo ExeMgr PID = $!
+
+$MCS_INSTALL_BIN/WriteEngineServer &> $LOG_PREFIX/writeengineserver.log &
+echo WriteEngineServer PID = $!
+
+sleep 2
+
+$MCS_INSTALL_BIN/DMLProc &> $LOG_PREFIX/dmlproc.log &
+echo DMLProc PID = $!
+
+$MCS_INSTALL_BIN/DDLProc &> $LOG_PREFIX/ddlproc.log &
+echo DDLProc PID = $!
+
+/usr/share/mysql/mysql.server start
+
+exit 0

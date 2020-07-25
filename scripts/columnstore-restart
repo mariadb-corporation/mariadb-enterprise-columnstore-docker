@@ -1,0 +1,13 @@
+#!/bin/bash
+
+MFLAG=/etc/columnstore/maintenance
+
+exec {lock_fd}>/var/lock/columnstore-restart || exit 1
+flock -n "$lock_fd" || { echo "ERROR: This script is already running." >&2; exit 1; }
+  touch $MFLAG
+  monit unmonitor all
+  columnstore-stop
+  columnstore-start
+  monit monitor all
+  rm -f $MFLAG
+flock -u "$lock_fd"
