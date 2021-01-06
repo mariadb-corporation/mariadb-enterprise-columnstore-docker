@@ -65,8 +65,7 @@ RUN chmod +x /usr/bin/tini \
     /usr/bin/columnstore-init \
     /usr/bin/columnstore-start \
     /usr/bin/columnstore-stop \
-    /usr/bin/columnstore-restart \
-    /usr/bin/tini && \
+    /usr/bin/columnstore-restart && \
     sed -i 's|set daemon\s.30|set daemon 5|g' /etc/monitrc && \
     sed -i 's|#.*with start delay\s.*240|  with start delay 60|g' /etc/monitrc
 
